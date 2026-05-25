@@ -73,8 +73,8 @@ app.post("/webhook", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════
 app.post("/api/send", requireApiKey, async (req, res) => {
   try {
-    const { type, phone, guestName, room, checkout, plan, wifi,
-            roomCharges, gst, total, reviewLink, message } = req.body;
+    const { type, phone, guestName, room, checkin, checkout, plan, wifi,
+            roomCharges, gst, total, reviewLink, reservationId, message } = req.body;
 
     if (!type || !phone) {
       return res.status(400).json({ success: false, error: "type and phone are required" });
@@ -83,9 +83,26 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     const to = formatPhone(phone);
 
     // ── CHECKIN ────────────────────────────────────────────────────────────
+    // Sends 2 messages:
+    // 1. booking_confirmation — Thank you for choosing us
+    // 2. checkin_message — Welcome + room details
     if (type === "checkin") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required for checkin" });
+      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
 
+      // Message 1 — Thank you / booking confirmation
+      await sendTemplate(to, "booking_confirmation", [
+        guestName,
+        reservationId || "—",
+        room          || "As booked",
+        checkin       || "As booked",
+        checkout      || "As booked",
+        plan          || "As booked",
+      ]);
+
+      // Small delay between messages
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Message 2 — Welcome + room details
       await sendTemplate(to, "checkin_message", [
         guestName,
         room     || "Your room",
@@ -93,13 +110,14 @@ app.post("/api/send", requireApiKey, async (req, res) => {
         plan     || "As booked",
       ]);
 
-      console.log(`✓ Check-in sent to ${to} for ${guestName}`);
-      return res.json({ success: true, message: `Check-in message sent to ${to}` });
+      console.log(`✓ Check-in messages sent to ${to} for ${guestName}`);
+      return res.json({ success: true, message: `Check-in messages sent to ${to}` });
     }
 
     // ── CHECKOUT ───────────────────────────────────────────────────────────
+    // Sends checkout bill message
     if (type === "checkout") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required for checkout" });
+      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
 
       await sendTemplate(to, "checkout_bill", [
         guestName,
@@ -109,26 +127,24 @@ app.post("/api/send", requireApiKey, async (req, res) => {
       ]);
 
       if (reviewLink) {
+        await new Promise(r => setTimeout(r, 2000));
         await sendMessage(to,
           `⭐ We'd love your feedback!\n\nPlease share your experience:\n${reviewLink}\n\nTeam ${HOTEL_NAME}`
         );
       }
 
-      console.log(`✓ Checkout sent to ${to} for ${guestName}`);
+      console.log(`✓ Checkout messages sent to ${to} for ${guestName}`);
       return res.json({ success: true, message: `Checkout message sent to ${to}` });
     }
 
     // ── CUSTOM MESSAGE ─────────────────────────────────────────────────────
     if (type === "message") {
-      if (!message) return res.status(400).json({ success: false, error: "message is required for type message" });
-
+      if (!message) return res.status(400).json({ success: false, error: "message is required" });
       await sendMessage(to, message);
-
       console.log(`✓ Custom message sent to ${to}`);
       return res.json({ success: true, message: `Message sent to ${to}` });
     }
 
-    // ── UNKNOWN TYPE ───────────────────────────────────────────────────────
     return res.status(400).json({
       success: false,
       error: `Unknown type "${type}". Use: checkin, checkout, or message`
