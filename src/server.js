@@ -20,6 +20,11 @@ function requireApiKey(req, res, next) {
   next();
 }
 
+function formatPhone(phone) {
+  const mobile = phone.replace(/\D/g, "");
+  return mobile.startsWith("91") ? mobile : "91" + mobile;
+}
+
 // ── Health check ───────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.json({ status: "Stayezee Manali bot running ✓" }));
 
@@ -62,88 +67,75 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PMS API — protected by x-api-key header
+//  SINGLE API ENDPOINT for Stayezee PMS
+//  POST /api/send
+//  Header: x-api-key: stayezee-pms-key-2024
 // ══════════════════════════════════════════════════════════════════════════
-
-// ── POST /api/checkin ──────────────────────────────────────────────────────
-// Uses approved template: checkin_message
-// {{1}}=guestName, {{2}}=room, {{3}}=checkout, {{4}}=plan
-app.post("/api/checkin", requireApiKey, async (req, res) => {
+app.post("/api/send", requireApiKey, async (req, res) => {
   try {
-    const { phone, guestName, room, checkout, plan, wifi } = req.body;
+    const { type, phone, guestName, room, checkout, plan, wifi,
+            roomCharges, gst, total, reviewLink, message } = req.body;
 
-    if (!phone || !guestName) {
-      return res.status(400).json({ success: false, error: "phone and guestName are required" });
+    if (!type || !phone) {
+      return res.status(400).json({ success: false, error: "type and phone are required" });
     }
 
-    const mobile = phone.replace(/\D/g, "");
-    const to = mobile.startsWith("91") ? mobile : "91" + mobile;
+    const to = formatPhone(phone);
 
-    await sendTemplate(to, "checkin_message", [
-      guestName,
-      room     || "Your room",
-      checkout || "As booked",
-      plan     || "As booked",
-    ]);
+    // ── CHECKIN ────────────────────────────────────────────────────────────
+    if (type === "checkin") {
+      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required for checkin" });
 
-    console.log(`✓ Check-in template sent to ${to} for ${guestName}`);
-    res.json({ success: true, message: `Check-in message sent to ${to}` });
+      await sendTemplate(to, "checkin_message", [
+        guestName,
+        room     || "Your room",
+        checkout || "As booked",
+        plan     || "As booked",
+      ]);
+
+      console.log(`✓ Check-in sent to ${to} for ${guestName}`);
+      return res.json({ success: true, message: `Check-in message sent to ${to}` });
+    }
+
+    // ── CHECKOUT ───────────────────────────────────────────────────────────
+    if (type === "checkout") {
+      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required for checkout" });
+
+      await sendTemplate(to, "checkout_bill", [
+        guestName,
+        String(Number(roomCharges || 0).toLocaleString()),
+        String(Number(gst        || 0).toLocaleString()),
+        String(Number(total      || 0).toLocaleString()),
+      ]);
+
+      if (reviewLink) {
+        await sendMessage(to,
+          `⭐ We'd love your feedback!\n\nPlease share your experience:\n${reviewLink}\n\nTeam ${HOTEL_NAME}`
+        );
+      }
+
+      console.log(`✓ Checkout sent to ${to} for ${guestName}`);
+      return res.json({ success: true, message: `Checkout message sent to ${to}` });
+    }
+
+    // ── CUSTOM MESSAGE ─────────────────────────────────────────────────────
+    if (type === "message") {
+      if (!message) return res.status(400).json({ success: false, error: "message is required for type message" });
+
+      await sendMessage(to, message);
+
+      console.log(`✓ Custom message sent to ${to}`);
+      return res.json({ success: true, message: `Message sent to ${to}` });
+    }
+
+    // ── UNKNOWN TYPE ───────────────────────────────────────────────────────
+    return res.status(400).json({
+      success: false,
+      error: `Unknown type "${type}". Use: checkin, checkout, or message`
+    });
+
   } catch (err) {
-    console.error("Check-in API error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── POST /api/checkout ─────────────────────────────────────────────────────
-// Uses approved template: checkout_bill
-// {{1}}=guestName, {{2}}=roomCharges, {{3}}=gst, {{4}}=total
-app.post("/api/checkout", requireApiKey, async (req, res) => {
-  try {
-    const { phone, guestName, roomCharges, gst, total, reviewLink } = req.body;
-
-    if (!phone || !guestName) {
-      return res.status(400).json({ success: false, error: "phone and guestName are required" });
-    }
-
-    const mobile = phone.replace(/\D/g, "");
-    const to = mobile.startsWith("91") ? mobile : "91" + mobile;
-
-    await sendTemplate(to, "checkout_bill", [
-      guestName,
-      String(Number(roomCharges || 0).toLocaleString()),
-      String(Number(gst || 0).toLocaleString()),
-      String(Number(total || 0).toLocaleString()),
-    ]);
-
-    // Send review link as a separate message if provided (within 24hr window)
-    if (reviewLink) {
-      await sendMessage(to,
-        `⭐ We'd love your feedback!\n\nPlease share your experience:\n${reviewLink}\n\nTeam ${HOTEL_NAME}`
-      );
-    }
-
-    console.log(`✓ Checkout template sent to ${to} for ${guestName}`);
-    res.json({ success: true, message: `Checkout message sent to ${to}` });
-  } catch (err) {
-    console.error("Checkout API error:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── POST /api/message ──────────────────────────────────────────────────────
-// Send any custom message to a guest (only works within 24hr window)
-app.post("/api/message", requireApiKey, async (req, res) => {
-  try {
-    const { phone, message } = req.body;
-    if (!phone || !message) {
-      return res.status(400).json({ success: false, error: "phone and message are required" });
-    }
-    const mobile = phone.replace(/\D/g, "");
-    const to = mobile.startsWith("91") ? mobile : "91" + mobile;
-    await sendMessage(to, message);
-    console.log(`✓ Custom message sent to ${to}`);
-    res.json({ success: true, message: `Message sent to ${to}` });
-  } catch (err) {
+    console.error("API /send error:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -152,4 +144,5 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🏔️ Stayezee Manali bot running on port ${PORT}`);
   console.log(`🔑 PMS API Key: ${API_KEY}`);
+  console.log(`📡 Single API: POST /api/send`);
 });
