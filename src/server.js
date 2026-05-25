@@ -4,6 +4,24 @@ const app = express();
 app.use(express.json());
 
 const { handleIncoming } = require("./handler");
+const { sendMessage } = require("./whatsapp");
+
+const HOTEL_NAME     = process.env.HOTEL_NAME     || "Stayezee";
+const HOTEL_LOCATION = process.env.HOTEL_LOCATION || "Manali, Himachal Pradesh";
+const HOTEL_PHONE    = process.env.HOTEL_PHONE    || "+91 72300 91101";
+const API_KEY        = process.env.PMS_API_KEY    || "stayezee-pms-key-2024";
+
+// ── API Key middleware ─────────────────────────────────────────────────────
+function requireApiKey(req, res, next) {
+  const key = req.headers["x-api-key"] || req.query.api_key;
+  if (!key || key !== API_KEY) {
+    return res.status(401).json({ success: false, error: "Invalid or missing API key" });
+  }
+  next();
+}
+
+// ── Health check ───────────────────────────────────────────────────────────
+app.get("/", (req, res) => res.json({ status: "Stayezee Manali bot running ✓" }));
 
 // ── Webhook verification ───────────────────────────────────────────────────
 app.get("/webhook", (req, res) => {
@@ -18,7 +36,7 @@ app.get("/webhook", (req, res) => {
   res.sendStatus(403);
 });
 
-// ── Incoming messages ──────────────────────────────────────────────────────
+// ── Incoming WhatsApp messages ─────────────────────────────────────────────
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
   try {
@@ -32,7 +50,7 @@ app.post("/webhook", async (req, res) => {
     const msgType = msg.type;
     let text = "", mediaId = null;
 
-    if (msgType === "text")  { text = msg.text?.body || ""; }
+    if (msgType === "text")       { text = msg.text?.body || ""; }
     else if (msgType === "image") { mediaId = msg.image?.id || null; text = msg.image?.caption || ""; }
     else return;
 
@@ -43,55 +61,111 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ── Health check ───────────────────────────────────────────────────────────
-app.get("/", (req, res) => res.json({ status: "Stayezee Manali bot running ✓" }));
+// ══════════════════════════════════════════════════════════════════════════
+//  PMS API — protected by x-api-key header
+// ══════════════════════════════════════════════════════════════════════════
 
-// ── Guest check-in notification (called by PMS) ────────────────────────────
-app.post("/send-checkin", async (req, res) => {
+// ── POST /api/checkin ──────────────────────────────────────────────────────
+// Called by Stayezee PMS when guest checks in
+// Body: { phone, guestName, room, checkout, plan, wifi }
+app.post("/api/checkin", requireApiKey, async (req, res) => {
   try {
     const { phone, guestName, room, checkout, plan, wifi } = req.body;
-    const { sendMessage } = require("./whatsapp");
-    const HOTEL_INFO = {
-      name: process.env.HOTEL_NAME || "Stayezee",
-      location: process.env.HOTEL_LOCATION || "Manali",
-    };
-    await sendMessage(phone,
-      `🏔️ *Welcome to ${HOTEL_INFO.name}, ${HOTEL_INFO.location}!*\n\n` +
-      `Dear ${guestName},\n\n` +
-      `You are now checked in!\n\n` +
-      `🛏 Room: ${room || "Your room"}\n` +
-      `📅 Check-out: ${checkout || "As booked"}\n` +
-      `🍽 Plan: ${plan || "As booked"}\n` +
-      `📶 WiFi: ${wifi || "Ask reception"}\n\n` +
-      `For any assistance, please call reception. 🙏\n` +
-      `We wish you a wonderful stay!`
+
+    if (!phone || !guestName) {
+      return res.status(400).json({ success: false, error: "phone and guestName are required" });
+    }
+
+    const mobile = phone.replace(/\D/g, "");
+    const to = mobile.startsWith("91") ? mobile : "91" + mobile;
+
+    await sendMessage(to,
+      `🏔️ *Welcome to ${HOTEL_NAME}, ${HOTEL_LOCATION}!*\n\n` +
+      `Dear *${guestName}*,\n\n` +
+      `You are now checked in. Here are your details:\n\n` +
+      `🛏 Room: *${room || "Your room"}*\n` +
+      `📅 Check-out: *${checkout || "As booked"}*\n` +
+      `🍽 Plan: *${plan || "As booked"}*\n` +
+      `📶 WiFi: *${wifi || "Ask reception"}*\n\n` +
+      `For any assistance please call reception:\n` +
+      `📞 ${HOTEL_PHONE}\n\n` +
+      `We wish you a wonderful stay! 🙏\n` +
+      `Team ${HOTEL_NAME}`
     );
-    res.json({ success: true });
+
+    console.log(`✓ Check-in message sent to ${to} for ${guestName}`);
+    res.json({ success: true, message: `Check-in message sent to ${to}` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Check-in API error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ── Guest checkout message ─────────────────────────────────────────────────
-app.post("/send-checkout", async (req, res) => {
+// ── POST /api/checkout ─────────────────────────────────────────────────────
+// Called by Stayezee PMS when guest checks out
+// Body: { phone, guestName, roomCharges, gst, total, reviewLink }
+app.post("/api/checkout", requireApiKey, async (req, res) => {
   try {
     const { phone, guestName, roomCharges, gst, total, reviewLink } = req.body;
-    const { sendMessage } = require("./whatsapp");
-    await sendMessage(phone,
-      `Dear ${guestName},\n\n` +
-      `Thank you for staying with us! 🙏\n\n` +
-      `*Bill Summary:*\n` +
-      `Room charges: Rs.${roomCharges}\n` +
-      `GST: Rs.${gst}\n` +
-      `Total: Rs.${total}\n\n` +
-      `We hope to see you again in Manali! 🏔️\n\n` +
-      (reviewLink ? `Please share your experience:\n${reviewLink}` : "")
+
+    if (!phone || !guestName) {
+      return res.status(400).json({ success: false, error: "phone and guestName are required" });
+    }
+
+    const mobile = phone.replace(/\D/g, "");
+    const to = mobile.startsWith("91") ? mobile : "91" + mobile;
+
+    await sendMessage(to,
+      `🙏 *Thank you for staying at ${HOTEL_NAME}!*\n\n` +
+      `Dear *${guestName}*,\n\n` +
+      `We hope you had a wonderful time in Manali! 🏔️\n\n` +
+      `*Your Bill Summary:*\n` +
+      `━━━━━━━━━━━━━━━━━━\n` +
+      `🛏 Room charges: Rs.${Number(roomCharges || 0).toLocaleString()}\n` +
+      `🧾 GST: Rs.${Number(gst || 0).toLocaleString()}\n` +
+      `💰 *Total: Rs.${Number(total || 0).toLocaleString()}*\n` +
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+      `We would love to see you again! 😊\n\n` +
+      (reviewLink
+        ? `⭐ Please share your experience:\n${reviewLink}\n\n`
+        : ``) +
+      `Team ${HOTEL_NAME}\n` +
+      `📞 ${HOTEL_PHONE}`
     );
-    res.json({ success: true });
+
+    console.log(`✓ Checkout message sent to ${to} for ${guestName}`);
+    res.json({ success: true, message: `Checkout message sent to ${to}` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Checkout API error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── POST /api/message ──────────────────────────────────────────────────────
+// Send any custom message to a guest
+// Body: { phone, message }
+app.post("/api/message", requireApiKey, async (req, res) => {
+  try {
+    const { phone, message } = req.body;
+    if (!phone || !message) {
+      return res.status(400).json({ success: false, error: "phone and message are required" });
+    }
+    const mobile = phone.replace(/\D/g, "");
+    const to = mobile.startsWith("91") ? mobile : "91" + mobile;
+    await sendMessage(to, message);
+    console.log(`✓ Custom message sent to ${to}`);
+    res.json({ success: true, message: `Message sent to ${to}` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => console.log(`🏔️ Stayezee Manali bot running on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🏔️ Stayezee Manali bot running on port ${PORT}`);
+  console.log(`🔑 PMS API Key: ${API_KEY}`);
+  console.log(`📡 API endpoints:`);
+  console.log(`   POST /api/checkin`);
+  console.log(`   POST /api/checkout`);
+  console.log(`   POST /api/message`);
+});
