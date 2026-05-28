@@ -6,10 +6,9 @@ app.use(express.json());
 const { handleIncoming } = require("./handler");
 const { sendMessage, sendTemplate } = require("./whatsapp");
 
-const HOTEL_NAME     = process.env.HOTEL_NAME     || "Stayezee";
-const HOTEL_LOCATION = process.env.HOTEL_LOCATION || "Manali, Himachal Pradesh";
-const HOTEL_PHONE    = process.env.HOTEL_PHONE    || "+91 72300 91101";
-const API_KEY        = process.env.PMS_API_KEY    || "stayezee-pms-key-2024";
+const HOTEL_NAME  = process.env.HOTEL_NAME  || "Stayezee";
+const HOTEL_PHONE = process.env.HOTEL_PHONE || "+91 72300 91101";
+const API_KEY     = process.env.PMS_API_KEY || "stayezee-pms-key-2024";
 
 function requireApiKey(req, res, next) {
   const key = req.headers["x-api-key"] || req.query.api_key;
@@ -24,12 +23,8 @@ function formatPhone(phone) {
   return mobile.startsWith("91") ? mobile : "91" + mobile;
 }
 
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// ── Health check ───────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.json({ status: "Stayezee Manali bot running ✓" }));
 
-// ── Webhook verification ───────────────────────────────────────────────────
 app.get("/webhook", (req, res) => {
   const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "stayezee_manali_verify_2024";
   const mode      = req.query["hub.mode"];
@@ -42,7 +37,6 @@ app.get("/webhook", (req, res) => {
   res.sendStatus(403);
 });
 
-// ── Incoming WhatsApp messages ─────────────────────────────────────────────
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
   try {
@@ -65,30 +59,17 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  SINGLE API ENDPOINT — POST /api/send
-//  Header: x-api-key: stayezee-pms-key-2024
-//
-//  Types:
-//  - reservation  → guest_reservation template
-//  - cancel       → cancel_reservation template
-//  - checkin      → checkin_message template
-//  - checkout     → checkout_bill template
-//  - food         → food_bill template
-//  - message      → custom text message
+//  SINGLE API — POST /api/send
+//  Types: reservation, cancel, checkin, checkout, food, message
 // ══════════════════════════════════════════════════════════════════════════
 app.post("/api/send", requireApiKey, async (req, res) => {
   try {
     const {
       type, phone, guestName,
-      // reservation & cancel fields
       bookingNo, arrivalDate, departureDate, rooms, roomType, tariff, pax, plan,
-      // checkin fields
       grNo, roomNo, checkinDate, checkoutDate,
-      // checkout fields
       roomCharges, gst, total, reviewLink,
-      // food bill fields
       billNo, billDate, outletName, billAmount,
-      // custom message
       message
     } = req.body;
 
@@ -98,92 +79,90 @@ app.post("/api/send", requireApiKey, async (req, res) => {
 
     const to = formatPhone(phone);
 
-    // ── RESERVATION CONFIRMED ──────────────────────────────────────────────
+    // ── RESERVATION ────────────────────────────────────────────────────────
+    // {{1}}=guestName {{2}}=bookingNo {{3}}=arrivalDate {{4}}=departureDate
+    // {{5}}=rooms {{6}}=roomType {{7}}=tariff {{8}}=pax {{9}}=plan
     if (type === "reservation") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-
-      await sendTemplate(to, "guest_reservation", {
-        guest_name:     guestName,
-        booking_no:     bookingNo     || "—",
-        arrival_date:   arrivalDate   || "—",
-        departure_date: departureDate || "—",
-        rooms:          String(rooms  || "1"),
-        room_type:      roomType      || "—",
-        tariff:         String(tariff || "—"),
-        pax:            String(pax    || "1"),
-        plan:           plan          || "—",
-      });
-
-      console.log(`✓ Reservation template sent to ${to} for ${guestName}`);
+      await sendTemplate(to, "guest_reservation", [
+        guestName,
+        bookingNo     || "—",
+        arrivalDate   || "—",
+        departureDate || "—",
+        String(rooms  || "1"),
+        roomType      || "—",
+        String(tariff || "—"),
+        String(pax    || "1"),
+        plan          || "—",
+      ]);
+      console.log(`✓ Reservation sent to ${to} for ${guestName}`);
       return res.json({ success: true, message: `Reservation message sent to ${to}` });
     }
 
-    // ── CANCEL RESERVATION ─────────────────────────────────────────────────
+    // ── CANCEL ─────────────────────────────────────────────────────────────
+    // {{1}}=guestName {{2}}=bookingNo {{3}}=arrivalDate {{4}}=departureDate
+    // {{5}}=rooms {{6}}=roomType {{7}}=tariff {{8}}=pax {{9}}=plan
     if (type === "cancel") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-
-      await sendTemplate(to, "cancel_reservation", {
-        guest_name:     guestName,
-        booking_no:     bookingNo     || "—",
-        arrival_date:   arrivalDate   || "—",
-        departure_date: departureDate || "—",
-        rooms:          String(rooms  || "1"),
-        room_type:      roomType      || "—",
-        tariff:         String(tariff || "—"),
-        pax:            String(pax    || "1"),
-        plan:           plan          || "—",
-      });
-
-      console.log(`✓ Cancel template sent to ${to} for ${guestName}`);
+      await sendTemplate(to, "cancel_reservation", [
+        guestName,
+        bookingNo     || "—",
+        arrivalDate   || "—",
+        departureDate || "—",
+        String(rooms  || "1"),
+        roomType      || "—",
+        String(tariff || "—"),
+        String(pax    || "1"),
+        plan          || "—",
+      ]);
+      console.log(`✓ Cancel sent to ${to} for ${guestName}`);
       return res.json({ success: true, message: `Cancellation message sent to ${to}` });
     }
 
-    // ── CHECK-IN ───────────────────────────────────────────────────────────
+    // ── CHECKIN ────────────────────────────────────────────────────────────
+    // {{1}}=guestName {{2}}=grNo {{3}}=roomNo {{4}}=checkinDate
+    // {{5}}=checkoutDate {{6}}=plan
     if (type === "checkin") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-
-      await sendTemplate(to, "checkin_message", {
-        guest_name:    guestName,
-        gr_no:         grNo         || "—",
-        room_no:       roomNo       || "—",
-        checkin_date:  checkinDate  || "—",
-        checkout_date: checkoutDate || "—",
-        plan:          plan         || "—",
-      });
-
-      console.log(`✓ Checkin template sent to ${to} for ${guestName}`);
+      await sendTemplate(to, "checkin_message", [
+        guestName,
+        grNo         || "—",
+        roomNo       || "—",
+        checkinDate  || "—",
+        checkoutDate || "—",
+        plan         || "—",
+      ]);
+      console.log(`✓ Checkin sent to ${to} for ${guestName}`);
       return res.json({ success: true, message: `Checkin message sent to ${to}` });
     }
 
-    // ── CHECKOUT BILL ──────────────────────────────────────────────────────
+    // ── CHECKOUT ───────────────────────────────────────────────────────────
+    // {{1}}=guestName {{2}}=roomCharges {{3}}=gst {{4}}=total {{5}}=reviewLink
     if (type === "checkout") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-
-      await sendTemplate(to, "checkout_bill", {
-        guest_name:   guestName,
-        room_charges: String(Number(roomCharges || 0).toLocaleString()),
-        gst:          String(Number(gst         || 0).toLocaleString()),
-        total:        String(Number(total       || 0).toLocaleString()),
-        review_link:  reviewLink || "https://g.page/r/stayezee",
-      });
-
-      console.log(`✓ Checkout template sent to ${to} for ${guestName}`);
+      await sendTemplate(to, "checkout_bill", [
+        guestName,
+        String(Number(roomCharges || 0).toLocaleString()),
+        String(Number(gst        || 0).toLocaleString()),
+        String(Number(total      || 0).toLocaleString()),
+        reviewLink || "https://g.page/r/stayezee",
+      ]);
+      console.log(`✓ Checkout sent to ${to} for ${guestName}`);
       return res.json({ success: true, message: `Checkout message sent to ${to}` });
     }
 
     // ── FOOD BILL ──────────────────────────────────────────────────────────
+    // {{1}}=guestName {{2}}=billNo {{3}}=billDate {{4}}=outletName {{5}}=billAmount
     if (type === "food") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-
-      await sendTemplate(to, "food_bill", {
-        guest_name:   guestName,
-        bill_no:      billNo      || "—",
-        bill_date:    billDate    || "—",
-        outlet_name:  outletName  || "Restaurant",
-        bill_amount:  String(Number(billAmount || 0).toLocaleString()),
-      });
-
-      console.log(`✓ Food bill template sent to ${to} for ${guestName}`);
+      await sendTemplate(to, "food_bill", [
+        guestName,
+        billNo     || "—",
+        billDate   || "—",
+        outletName || "Restaurant",
+        String(Number(billAmount || 0).toLocaleString()),
+      ]);
+      console.log(`✓ Food bill sent to ${to} for ${guestName}`);
       return res.json({ success: true, message: `Food bill sent to ${to}` });
     }
 

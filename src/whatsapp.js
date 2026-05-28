@@ -23,32 +23,14 @@ async function sendMessage(to, text) {
   }
 }
 
-// Supports named variables: { guest_name: "Rahul", booking_no: "CNR2" }
-// Sends as: [{ type: "text", parameter_name: "guest_name", text: "Rahul" }, ...]
 async function sendTemplate(to, templateName, params = []) {
   const toNum = to.replace(/^\+/, "");
   if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
     console.log(`[MOCK TEMPLATE] To: ${toNum} | ${templateName} | Params:`, params);
     return;
   }
-
-  let parameters = [];
-  if (Array.isArray(params)) {
-    // Positional array
-    parameters = params.map(p => ({ type: "text", text: String(p) }));
-  } else if (typeof params === "object") {
-    // Named variables — send as parameter_name + text
-    parameters = Object.entries(params).map(([key, val]) => ({
-      type: "text",
-      parameter_name: key,
-      text: String(val)
-    }));
-  }
-
-  const components = parameters.length > 0
-    ? [{ type: "body", parameters }]
-    : [];
-
+  const parameters = params.map(p => ({ type: "text", text: String(p) }));
+  const components = parameters.length > 0 ? [{ type: "body", parameters }] : [];
   try {
     const res = await axios.post(
       `${BASE_URL}/${PHONE_NUMBER_ID}/messages`,
