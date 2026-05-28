@@ -84,7 +84,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{5}}=rooms {{6}}=roomType {{7}}=tariff {{8}}=pax {{9}}=plan
     if (type === "reservation") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-      await sendTemplate(to, "guest_reservation", [
+      await sendTemplate(to, "_guest_reservation", [
         guestName,
         bookingNo     || "—",
         arrivalDate   || "—",
@@ -104,7 +104,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{5}}=rooms {{6}}=roomType {{7}}=tariff {{8}}=pax {{9}}=plan
     if (type === "cancel") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-      await sendTemplate(to, "cancel_reservation", [
+      await sendTemplate(to, "_cancel_reservation", [
         guestName,
         bookingNo     || "—",
         arrivalDate   || "—",
@@ -124,7 +124,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{5}}=checkoutDate {{6}}=plan
     if (type === "checkin") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-      await sendTemplate(to, "checkin_message", [
+      await sendTemplate(to, "_checkin_message", [
         guestName,
         grNo         || "—",
         roomNo       || "—",
@@ -140,7 +140,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{1}}=guestName {{2}}=roomCharges {{3}}=gst {{4}}=total {{5}}=reviewLink
     if (type === "checkout") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-      await sendTemplate(to, "checkout_bill", [
+      await sendTemplate(to, "_checkout_bill", [
         guestName,
         String(Number(roomCharges || 0).toLocaleString()),
         String(Number(gst        || 0).toLocaleString()),
@@ -155,7 +155,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{1}}=guestName {{2}}=billNo {{3}}=billDate {{4}}=outletName {{5}}=billAmount
     if (type === "food") {
       if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-      await sendTemplate(to, "food_bill", [
+      await sendTemplate(to, "_food_bill", [
         guestName,
         billNo     || "—",
         billDate   || "—",
