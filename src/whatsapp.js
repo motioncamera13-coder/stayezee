@@ -23,9 +23,8 @@ async function sendMessage(to, text) {
   }
 }
 
-// sendTemplate supports both:
-// Array:  sendTemplate(to, "template_name", ["value1", "value2"])
-// Object: sendTemplate(to, "template_name", { guest_name: "Rahul", booking_no: "CNR2" })
+// Supports named variables: { guest_name: "Rahul", booking_no: "CNR2" }
+// Sends as: [{ type: "text", parameter_name: "guest_name", text: "Rahul" }, ...]
 async function sendTemplate(to, templateName, params = []) {
   const toNum = to.replace(/^\+/, "");
   if (!PHONE_NUMBER_ID || !ACCESS_TOKEN) {
@@ -35,11 +34,15 @@ async function sendTemplate(to, templateName, params = []) {
 
   let parameters = [];
   if (Array.isArray(params)) {
-    // Array format — positional
+    // Positional array
     parameters = params.map(p => ({ type: "text", text: String(p) }));
   } else if (typeof params === "object") {
-    // Object format — named variables, send values in order
-    parameters = Object.values(params).map(p => ({ type: "text", text: String(p) }));
+    // Named variables — send as parameter_name + text
+    parameters = Object.entries(params).map(([key, val]) => ({
+      type: "text",
+      parameter_name: key,
+      text: String(val)
+    }));
   }
 
   const components = parameters.length > 0
