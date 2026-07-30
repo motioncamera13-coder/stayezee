@@ -3,18 +3,19 @@ const { parseEnquiry } = require("./parser");
 const { checkAvailability, saveReservation, cancelReservation } = require("./stayezee");
 const { getRate } = require("./rates");
 const { sendMessage, sendReminder } = require("./whatsapp");
+const { addToLog, getEnquiryLog, clearEnquiryLog } = require("./enquiry-log");
 
 const ADMIN_PHONE = process.env.ADMIN_PHONE || "919116091107";
 
 // Session stores
-const sessions = {};        // booking sessions per user
-const pendingPayments = {}; // phone -> payment info after booking
+const sessions = {};
+const pendingPayments = {};
 const pendingCancellations = {};
 
 const HOTEL_INFO = {
-  name:      process.env.HOTEL_NAME       || "Stayezee",
-  location:  process.env.HOTEL_LOCATION   || "Manali, Himachal Pradesh",
-  phone:     process.env.HOTEL_PHONE      || "+91 72300 91101",
+  name:      process.env.HOTEL_NAME          || "Stayezee",
+  location:  process.env.HOTEL_LOCATION      || "Manali, Himachal Pradesh",
+  phone:     process.env.HOTEL_PHONE         || "+91 72300 91101",
   checkIn:   process.env.HOTEL_CHECKIN_TIME  || "2:00 PM",
   checkOut:  process.env.HOTEL_CHECKOUT_TIME || "12:00 PM",
   googleMaps: "https://maps.google.com/?q=Manali",
@@ -77,16 +78,12 @@ async function handleIncoming({ from, text, msgId, msgType, mediaId }) {
 
 // ── ADMIN HANDLER ────────────────────────────────────────────────────────────
 async function handleAdmin(from, text, t) {
-  // APPROVE PAY <phone> <amount>
   if (t.startsWith("APPROVE PAY ")) {
     const parts = t.split(" ");
     const phone = parts[2];
     const amount = parseInt(parts[3]);
     const pending = pendingPayments[phone];
-    if (!pending) {
-      await sendMessage(from, `❌ No pending payment for ${phone}`);
-      return;
-    }
+    if (!pending) { await sendMessage(from, `❌ No pending payment for ${phone}`); return; }
     pending.paidSoFar = (pending.paidSoFar || 0) + amount;
     await sendMessage(phone,
       `✅ *Payment Confirmed!*\n\n` +
@@ -103,7 +100,6 @@ async function handleAdmin(from, text, t) {
     return;
   }
 
-  // REJECT PAY <phone>
   if (t.startsWith("REJECT PAY ")) {
     const phone = t.split(" ")[2];
     const pending = pendingPayments[phone];
@@ -117,7 +113,6 @@ async function handleAdmin(from, text, t) {
     return;
   }
 
-  // APPROVE CANCEL <voucherNo>
   if (t.startsWith("APPROVE CANCEL ")) {
     const voucherNo = t.split(" ")[2];
     const cancel = pendingCancellations[voucherNo];
@@ -135,7 +130,6 @@ async function handleAdmin(from, text, t) {
     return;
   }
 
-  // REJECT CANCEL <voucherNo>
   if (t.startsWith("REJECT CANCEL ")) {
     const voucherNo = t.split(" ")[2];
     const cancel = pendingCancellations[voucherNo];
@@ -150,7 +144,6 @@ async function handleAdmin(from, text, t) {
     return;
   }
 
-  // STATUS — show pending bookings
   if (t === "STATUS" || t === "PENDING") {
     const pp = Object.entries(pendingPayments);
     if (pp.length === 0) { await sendMessage(from, `📋 No pending payments.`); return; }
@@ -176,12 +169,10 @@ async function handleUser(from, text, t, msgType) {
   const session = sessions[from] || { step: "idle" };
   sessions[from] = session;
 
-  // CANCEL command
   if (t === "CANCEL" || t === "CANCEL BOOKING") {
-    const myBookings = Object.values(pendingPayments).filter(p => p.guestPhone === from || p.guestPhone === from);
+    const myBookings = Object.values(pendingPayments).filter(p => p.guestPhone === from);
     const sessionBooking = session.voucherNo ? pendingPayments[Object.keys(pendingPayments).find(k => pendingPayments[k].voucherNo === session.voucherNo)] : null;
     const booking = sessionBooking || myBookings[0];
-
     if (!booking) {
       await sendMessage(from, `❌ No active booking found to cancel.\n\nFor help: 📞 ${HOTEL_INFO.phone}`);
       return;
@@ -202,7 +193,6 @@ async function handleUser(from, text, t, msgType) {
     return;
   }
 
-  // Awaiting cancel confirm
   if (session.step === "awaiting_cancel_confirm") {
     if (["YES","Y"].includes(t)) {
       const voucherNo = session.cancelVoucherNo;
@@ -210,21 +200,17 @@ async function handleUser(from, text, t, msgType) {
       const booking = bookingEntry ? bookingEntry[1] : null;
       const daysLeft = booking ? Math.round((new Date(booking.ciDate) - new Date()) / 86400000) : 0;
       const refund = daysLeft > 15 ? (booking?.paidSoFar || 0) : 0;
-
       pendingCancellations[voucherNo] = {
-        guestPhone: from,
-        guestName: booking?.guestName || "Guest",
+        guestPhone: from, guestName: booking?.guestName || "Guest",
         ciDate: booking?.ciDate, coDate: booking?.coDate,
-        voucherNo, refundAmount: refund,
-        stayezeeId: booking?.stayezeeId,
+        voucherNo, refundAmount: refund, stayezeeId: booking?.stayezeeId,
       };
-
-      await sendMessage(from,
-        `✅ *Cancellation request submitted.*\n\nVoucher: *${voucherNo}*\n\nPending admin approval. We'll notify you shortly. 🙏`
-      );
+      await sendMessage(from, `✅ *Cancellation request submitted.*\n\nVoucher: *${voucherNo}*\n\nPending admin approval. 🙏`);
       await sendReminder(ADMIN_PHONE,
         `❌ *CANCELLATION REQUEST*\n\nGuest: ${booking?.guestName} (${from})\nVoucher: *${voucherNo}*\nCheck-in: ${fmtDate(booking?.ciDate)}\nRefund: ${refund > 0 ? `Rs.${refund.toLocaleString()}` : "None"}\n\nAPPROVE CANCEL ${voucherNo}\nREJECT CANCEL ${voucherNo}`
       );
+      // Update log status
+      addToLog({ phone: from, name: booking?.guestName, status: "Cancellation requested" });
       session.step = "idle";
     } else {
       await sendMessage(from, `Booking kept active. See you in Manali! 🏔️`);
@@ -233,7 +219,6 @@ async function handleUser(from, text, t, msgType) {
     return;
   }
 
-  // Awaiting guest name
   if (session.step === "awaiting_guest_name") {
     session.guestName = text.trim();
     session.step = "awaiting_guest_mobile";
@@ -241,7 +226,6 @@ async function handleUser(from, text, t, msgType) {
     return;
   }
 
-  // Awaiting guest mobile
   if (session.step === "awaiting_guest_mobile") {
     const mobile = text.replace(/\D/g, "");
     session.guestMobile = mobile.startsWith("91") ? mobile : "91" + mobile;
@@ -250,7 +234,6 @@ async function handleUser(from, text, t, msgType) {
     return;
   }
 
-  // Awaiting checkout date
   if (session.step === "awaiting_checkout") {
     const parsed = parseEnquiry("dlx " + text);
     if (parsed?.ciDate) {
@@ -259,20 +242,16 @@ async function handleUser(from, text, t, msgType) {
       if (!session.plan) {
         session.step = "awaiting_plan";
         await sendMessage(from, `Got it! Now what *meal plan*?\n\n*CP* - With Breakfast\n*MAP* - Breakfast + Dinner\n*EP* - Room only`);
-      } else {
-        await checkAndRespond(from, session);
-      }
+      } else { await checkAndRespond(from, session); }
     } else {
       await sendMessage(from, `Please share the *check-out date*.\nExample: *12 July*`);
     }
     return;
   }
 
-  // Awaiting plan
   if (session.step === "awaiting_plan") {
-    const planInput = t.trim();
-    if (["CP","MAP","MAPAI","EP"].includes(planInput)) {
-      session.plan = planInput;
+    if (["CP","MAP","MAPAI","EP"].includes(t)) {
+      session.plan = t;
       session.step = "idle";
       await checkAndRespond(from, session);
     } else {
@@ -281,30 +260,25 @@ async function handleUser(from, text, t, msgType) {
     return;
   }
 
-  // Awaiting confirm (YES/NO + upgrades)
   if (session.step === "awaiting_confirm") {
     if (["SUPER","SUPERDELUXE","SUPER DELUXE","SD","SDX","SDLX"].includes(t)) {
       session.roomType = "superdeluxe";
       session.roomTypes = [{ type: "superdeluxe", count: session.rooms }];
-      await checkAndRespond(from, session);
-      return;
+      await checkAndRespond(from, session); return;
     }
     if (["HONEY","HONEYMOON","HM","HON"].includes(t)) {
       session.roomType = "honeymoon";
       session.roomTypes = [{ type: "honeymoon", count: session.rooms }];
-      await checkAndRespond(from, session);
-      return;
+      await checkAndRespond(from, session); return;
     }
     if (["DELUXE","DLX","DEL"].includes(t)) {
       session.roomType = "deluxe";
       session.roomTypes = [{ type: "deluxe", count: session.rooms }];
-      await checkAndRespond(from, session);
-      return;
+      await checkAndRespond(from, session); return;
     }
     if (["YES","Y","CONFIRM","OK","HAAN"].includes(t)) {
       if (session.timeoutId) { clearTimeout(session.timeoutId); session.timeoutId = null; }
       if (session.reminderIds) { session.reminderIds.forEach(id => clearTimeout(id)); session.reminderIds = []; }
-      // Re-verify availability
       await sendMessage(from, `Verifying room availability...`);
       try {
         const recheck = await checkAvailability({ ciDate: session.ciDate, coDate: session.coDate, rooms: session.rooms || 1 });
@@ -314,6 +288,8 @@ async function handleUser(from, text, t, msgType) {
           return;
         }
       } catch(e) { /* continue */ }
+      // Update log
+      addToLog({ phone: from, name: session.guestName, status: "Booking confirmed ✅" });
       session.step = "awaiting_guest_name";
       await sendMessage(from, `Please share the *guest full name*:`);
       return;
@@ -321,20 +297,18 @@ async function handleUser(from, text, t, msgType) {
     if (["NO","N","CANCEL","NAHI"].includes(t)) {
       if (session.timeoutId) { clearTimeout(session.timeoutId); session.timeoutId = null; }
       if (session.reminderIds) { session.reminderIds.forEach(id => clearTimeout(id)); session.reminderIds = []; }
+      // Update log
+      addToLog({ phone: from, status: "Declined ❌" });
       session.step = "idle";
       await sendMessage(from, `No problem! Feel free to enquire again anytime. 🙏`);
       return;
     }
   }
 
-  // MENU / HELP
   if (["MENU","0","HELP","HI","HELLO","START","HAI","HEY"].includes(t)) {
-    await sendWelcomeMenu(from);
-    return;
+    await sendWelcomeMenu(from); return;
   }
-
   if (t === "1") { await sendWelcomeMenu(from); return; }
-
   if (t === "2") {
     await sendMessage(from,
       `📍 *${HOTEL_INFO.name}*\n${HOTEL_INFO.location}\n\n` +
@@ -345,7 +319,6 @@ async function handleUser(from, text, t, msgType) {
     );
     return;
   }
-
   if (t === "3") {
     const { FLAT_RATES } = require("./rates");
     await sendMessage(from,
@@ -353,23 +326,15 @@ async function handleUser(from, text, t, msgType) {
       `🛏 *Deluxe* — Rs.${FLAT_RATES.deluxe.toLocaleString()}/night\n` +
       `🛏 *Super Deluxe* — Rs.${FLAT_RATES.superdeluxe.toLocaleString()}/night\n` +
       `🛏 *Honeymoon* — Rs.${FLAT_RATES.honeymoon.toLocaleString()}/night\n\n` +
-      `*Meal Plans:*\n` +
-      `CP - With Breakfast\n` +
-      `MAP - Breakfast + Dinner\n` +
-      `EP - Room only\n\n` +
-      `_Rates are per room per night._\n\n` +
-      `Reply *0* for menu.`
+      `*Meal Plans:*\nCP - With Breakfast\nMAP - Breakfast + Dinner\nEP - Room only\n\n` +
+      `_Rates are per room per night._\n\nReply *0* for menu.`
     );
     return;
   }
-
   if (t === "4") {
     await sendMessage(from,
       `📞 *Contact Us*\n\n` +
-      `Hotel: ${HOTEL_INFO.name}\n` +
-      `Phone: ${HOTEL_INFO.phone}\n` +
-      `Location: ${HOTEL_INFO.location}\n\n` +
-      `Reply *0* for menu.`
+      `Hotel: ${HOTEL_INFO.name}\nPhone: ${HOTEL_INFO.phone}\nLocation: ${HOTEL_INFO.location}\n\nReply *0* for menu.`
     );
     return;
   }
@@ -384,21 +349,26 @@ async function handleUser(from, text, t, msgType) {
     session.roomTypes = enquiry.roomTypes || null;
     if (enquiry.plan) session.plan = enquiry.plan;
 
-    // Validate future date
     const today = new Date(); today.setHours(0,0,0,0);
     if (new Date(session.ciDate) < today) {
       await sendMessage(from, `Check-in date *${fmtDate(session.ciDate)}* is in the past. Please send a future date.`);
       return;
     }
 
-    // Ack
+    // Log enquiry immediately
+    addToLog({
+      phone: from,
+      name: "Unknown",
+      status: "Enquiry received 🔍",
+      dates: `CI: ${fmtDate(session.ciDate)}${session.coDate ? ` → CO: ${fmtDate(session.coDate)}` : ""}`,
+      rooms: `${session.rooms} x ${session.roomType || "Deluxe"}`,
+    });
+
     await sendMessage(from,
       `Thanks for your enquiry! 😊\n\n` +
       `Check-in: ${fmtDate(session.ciDate)}\n` +
       `Check-out: ${session.coDate ? fmtDate(session.coDate) : "—"}\n` +
-      `Rooms: ${session.rooms}\n` +
-      `Plan: ${session.plan || "—"}\n\n` +
-      `Checking availability...`
+      `Rooms: ${session.rooms}\nPlan: ${session.plan || "—"}\n\nChecking availability...`
     );
 
     if (!session.coDate) {
@@ -415,7 +385,6 @@ async function handleUser(from, text, t, msgType) {
     return;
   }
 
-  // Partial session fill-in
   if (session.ciDate && !session.coDate) {
     const parsed = parseEnquiry("dlx " + text);
     if (parsed?.ciDate) {
@@ -435,7 +404,6 @@ async function handleUser(from, text, t, msgType) {
     }
   }
 
-  // Default
   await sendWelcomeMenu(from);
 }
 
@@ -455,35 +423,24 @@ async function sendWelcomeMenu(from) {
   );
 }
 
-// ── CHECK AVAILABILITY AND SEND RATE QUOTE ───────────────────────────────────
+// ── CHECK AVAILABILITY ────────────────────────────────────────────────────────
 async function checkAndRespond(from, session) {
   try {
     const nights = calcNights(session.ciDate, session.coDate);
     session.nights = nights;
-
     if (nights <= 0) {
       await sendMessage(from, `Check-out must be after check-in. Please try again.`);
-      session.step = "idle";
-      return;
+      session.step = "idle"; return;
     }
-
-    const result = await checkAvailability({
-      ciDate: session.ciDate,
-      coDate: session.coDate,
-      rooms: session.rooms || 1,
-    });
-
+    const result = await checkAvailability({ ciDate: session.ciDate, coDate: session.coDate, rooms: session.rooms || 1 });
     if (result.available) {
       session.step = "awaiting_confirm";
       const plan = session.plan;
-
       const roomTypesList = session.roomTypes && session.roomTypes.length > 1
         ? session.roomTypes
         : [{ type: session.roomType || "deluxe", count: session.rooms }];
-
       let msg = `✅ *Rooms Available!*\n\n`;
       let grandTotal = 0;
-
       for (const rt of roomTypesList) {
         const info = getRate(rt.type);
         const rate = info?.rate || 0;
@@ -492,80 +449,62 @@ async function checkAndRespond(from, session) {
         msg += `*${rt.count} x ${info?.roomType || rt.type}*\n`;
         msg += `  Rate: *Rs.${rate.toLocaleString()}/night*\n\n`;
       }
-
       msg += `📅 Check-in:  *${fmtDate(session.ciDate)}*\n`;
       msg += `📅 Check-out: *${fmtDate(session.coDate)}*\n`;
       msg += `🌙 Nights: *${nights}*\n`;
       msg += `🍽 Plan: *${plan}*\n`;
       msg += `💰 Total: *Rs.${Math.round(grandTotal).toLocaleString()}*\n\n`;
-
-      // Upgrade options
       const currentType = (session.roomTypes?.[0]?.type || session.roomType || "deluxe").toLowerCase();
       if (!currentType.includes("honey")) {
         const { FLAT_RATES } = require("./rates");
         msg += `🔼 *Upgrade options:*\n`;
-        if (!currentType.includes("super")) {
-          msg += `  Reply *SUPER* → Super Deluxe (Rs.${FLAT_RATES.superdeluxe.toLocaleString()}/night)\n`;
-        }
+        if (!currentType.includes("super")) msg += `  Reply *SUPER* → Super Deluxe (Rs.${FLAT_RATES.superdeluxe.toLocaleString()}/night)\n`;
         msg += `  Reply *HONEY* → Honeymoon (Rs.${FLAT_RATES.honeymoon.toLocaleString()}/night)\n\n`;
       }
-
       msg += `Reply *YES* to confirm or *NO* to cancel.\n\n`;
       msg += `📍 ${HOTEL_INFO.googleMaps}`;
-
       session.totalAmount = Math.round(grandTotal);
       await sendMessage(from, msg);
 
-      // Follow-up reminders
+      // Update log with availability status
+      addToLog({
+        phone: from,
+        status: `Available ✅ | Rs.${Math.round(grandTotal).toLocaleString()}`,
+        dates: `CI: ${fmtDate(session.ciDate)} → CO: ${fmtDate(session.coDate)}`,
+        rooms: `${session.rooms} x ${session.roomType || "Deluxe"} | ${plan}`,
+      });
+
       if (session.timeoutId) clearTimeout(session.timeoutId);
       if (session.reminderIds) session.reminderIds.forEach(id => clearTimeout(id));
       session.reminderIds = [];
-
       const enquirySummary = `CI: ${fmtDate(session.ciDate)} | CO: ${fmtDate(session.coDate)} | ${session.rooms}R | ${plan} | Rs.${Math.round(grandTotal).toLocaleString()}`;
-
-      [24, 48, 72].forEach((hrs, idx) => {
+      [24, 48, 72].forEach((hrs) => {
         const id = setTimeout(async () => {
           if (sessions[from]?.step !== "awaiting_confirm") return;
-          await sendMessage(from,
-            `👋 Following up on your enquiry!\n\n${enquirySummary}\n\nRooms still available. Reply *YES* to confirm or *NO* to cancel.`
-          );
+          await sendMessage(from, `👋 Following up on your enquiry!\n\n${enquirySummary}\n\nRooms still available. Reply *YES* to confirm or *NO* to cancel.`);
         }, hrs * 60 * 60 * 1000);
         session.reminderIds.push(id);
       });
-
-      // Auto-cancel after 1 week
       const finalId = setTimeout(async () => {
         if (sessions[from]?.step !== "awaiting_confirm") return;
         sessions[from].step = "idle";
+        addToLog({ phone: from, status: "Auto-cancelled ⏰" });
         await sendMessage(from, `Your enquiry has been auto-cancelled after 1 week. Send a new enquiry anytime. 🙏`);
         await sendReminder(ADMIN_PHONE, `⚠️ AUTO-CANCELLED\n${from}\n${enquirySummary}`);
       }, 7 * 24 * 60 * 60 * 1000);
       session.reminderIds.push(finalId);
 
-      await sendReminder(ADMIN_PHONE,
-        `✅ *AVAILABLE*\nFrom: ${from}\n${enquirySummary}\nAwaiting confirmation.`
-      );
-
     } else if (result.available === false) {
       session.step = "idle";
+      addToLog({ phone: from, status: "Not available ❌" });
       await sendMessage(from,
-        `❌ Sorry, rooms not available for:\n\n` +
-        `Check-in:  *${fmtDate(session.ciDate)}*\n` +
-        `Check-out: *${fmtDate(session.coDate)}*\n` +
-        `Rooms: *${session.rooms}*\n\n` +
-        `Please try different dates. 🙏\n\n` +
-        `Contact us: 📞 ${HOTEL_INFO.phone}`
+        `❌ Sorry, rooms not available for:\n\nCheck-in:  *${fmtDate(session.ciDate)}*\nCheck-out: *${fmtDate(session.coDate)}*\nRooms: *${session.rooms}*\n\nPlease try different dates. 🙏\n\nContact us: 📞 ${HOTEL_INFO.phone}`
       );
     } else {
-      // PMS error — still respond helpfully
       session.step = "idle";
-      await sendMessage(from,
-        `⚠️ Could not check availability right now.\n\n` +
-        `Please contact us directly:\n📞 ${HOTEL_INFO.phone}`
-      );
-      await sendReminder(ADMIN_PHONE,
-        `⚠️ PMS ERROR\nFrom: ${from}\nCI: ${session.ciDate} CO: ${session.coDate}\nError: ${result.error || "unknown"}`
-      );
+      addToLog({ phone: from, status: "PMS error ⚠️" });
+      await sendMessage(from, `⚠️ Could not check availability right now.\n\nPlease contact us directly:\n📞 ${HOTEL_INFO.phone}`);
+      await sendReminder(ADMIN_PHONE, `⚠️ PMS ERROR\nFrom: ${from}\nCI: ${session.ciDate} CO: ${session.coDate}\nError: ${result.error || "unknown"}`);
     }
   } catch (err) {
     console.error("checkAndRespond error:", err.message);
@@ -573,101 +512,68 @@ async function checkAndRespond(from, session) {
   }
 }
 
-// ── CONFIRM AND SAVE TO STAYEZEE ─────────────────────────────────────────────
+// ── CONFIRM AND SAVE ──────────────────────────────────────────────────────────
 async function confirmAndSave(from, session) {
   try {
     const voucherNo = genVoucher();
     session.voucherNo = voucherNo;
-
     const pmsRoomType = session.roomType === "honeymoon" ? "Honeymoon" :
                         session.roomType === "superdeluxe" ? "Super Deluxe" : "Deluxe";
-
     const stayRes = await saveReservation({
-      guestName:    session.guestName,
-      guestMobile:  session.guestMobile || from,
-      male: 1, female: 0, kids: 0,
-      plan:         session.plan || "EP",
-      tariff:       session.totalAmount || 0,
-      rooms:        session.rooms || 1,
-      checkinDate:  session.ciDate,
-      checkoutDate: session.coDate,
-      roomType:     pmsRoomType,
+      guestName: session.guestName, guestMobile: session.guestMobile || from,
+      male: 1, female: 0, kids: 0, plan: session.plan || "EP",
+      tariff: session.totalAmount || 0, rooms: session.rooms || 1,
+      checkinDate: session.ciDate, checkoutDate: session.coDate, roomType: pmsRoomType,
     });
-
     const stayezeeId = stayRes?.data?.reservation_id || stayRes?.data?.id || null;
     const advance = Math.round((session.totalAmount || 0) * 0.3);
     const total = session.totalAmount || 0;
-
-    // Store pending payment
     pendingPayments[from] = {
-      voucherNo, guestName: session.guestName,
-      guestPhone: from,
+      voucherNo, guestName: session.guestName, guestPhone: from,
       ciDate: session.ciDate, coDate: session.coDate,
       rooms: session.rooms, roomType: session.roomType, plan: session.plan,
-      amount: advance, total, paidSoFar: 0,
-      stayezeeId,
+      amount: advance, total, paidSoFar: 0, stayezeeId,
     };
+
+    // Update log with guest name and booking status
+    addToLog({ phone: from, name: session.guestName, status: `Booked ✅ | Voucher: ${voucherNo}` });
 
     const upiLink = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(HOTEL_INFO.name)}&am=${advance}&cu=INR&tn=${voucherNo}`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=800x800&ecc=H&margin=2&data=${encodeURIComponent(upiLink)}`;
-
-    // Send confirmation with payment QR
     const axios = require("axios");
     try {
       await axios.post(
         `https://graph.facebook.com/v25.0/${process.env.WA_PHONE_NUMBER_ID}/messages`,
         {
-          messaging_product: "whatsapp", recipient_type: "individual", to: from,
-          type: "image",
+          messaging_product: "whatsapp", recipient_type: "individual", to: from, type: "image",
           image: {
             link: qrUrl,
             caption:
-              `🎉 *Booking Confirmed!*\n\n` +
-              `Voucher: *${voucherNo}*\n` +
-              `Guest: ${session.guestName}\n` +
+              `🎉 *Booking Confirmed!*\n\nVoucher: *${voucherNo}*\nGuest: ${session.guestName}\n` +
               `Check-in: *${fmtDate(session.ciDate)}* at ${HOTEL_INFO.checkIn}\n` +
               `Check-out: *${fmtDate(session.coDate)}* at ${HOTEL_INFO.checkOut}\n` +
-              `Rooms: ${session.rooms} x ${pmsRoomType}\n` +
-              `Plan: ${session.plan}\n` +
-              `Total: Rs.${total.toLocaleString()}\n\n` +
-              `💳 *Pay 30% Advance: Rs.${advance.toLocaleString()}*\n` +
-              `UPI: *${UPI_ID}*\n\n` +
-              `📸 Send payment screenshot to confirm.\n\n` +
-              `📍 ${HOTEL_INFO.googleMaps}`
+              `Rooms: ${session.rooms} x ${pmsRoomType}\nPlan: ${session.plan}\nTotal: Rs.${total.toLocaleString()}\n\n` +
+              `💳 *Pay 30% Advance: Rs.${advance.toLocaleString()}*\nUPI: *${UPI_ID}*\n\n` +
+              `📸 Send payment screenshot to confirm.\n\n📍 ${HOTEL_INFO.googleMaps}`
           }
         },
         { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}`, "Content-Type": "application/json" } }
       );
     } catch (e) {
-      // Fallback to text if image fails
       await sendMessage(from,
-        `🎉 *Booking Confirmed!*\n\n` +
-        `Voucher: *${voucherNo}*\n` +
-        `Guest: ${session.guestName}\n` +
-        `Check-in: *${fmtDate(session.ciDate)}*\n` +
-        `Check-out: *${fmtDate(session.coDate)}*\n` +
-        `Rooms: ${session.rooms} x ${pmsRoomType}\n` +
-        `Plan: ${session.plan}\n` +
-        `Total: Rs.${total.toLocaleString()}\n\n` +
-        `💳 Pay 30% advance: *Rs.${advance.toLocaleString()}*\n` +
-        `UPI ID: *${UPI_ID}*\n\n` +
-        `📸 Send payment screenshot.\n\n` +
-        `📍 ${HOTEL_INFO.googleMaps}`
+        `🎉 *Booking Confirmed!*\n\nVoucher: *${voucherNo}*\nGuest: ${session.guestName}\n` +
+        `Check-in: *${fmtDate(session.ciDate)}*\nCheck-out: *${fmtDate(session.coDate)}*\n` +
+        `Rooms: ${session.rooms} x ${pmsRoomType}\nPlan: ${session.plan}\nTotal: Rs.${total.toLocaleString()}\n\n` +
+        `💳 Pay 30% advance: *Rs.${advance.toLocaleString()}*\nUPI ID: *${UPI_ID}*\n\n` +
+        `📸 Send payment screenshot.\n\n📍 ${HOTEL_INFO.googleMaps}`
       );
     }
-
-    // Notify admin
     await sendReminder(ADMIN_PHONE,
-      `🎉 *NEW BOOKING*\n\n` +
-      `Voucher: *${voucherNo}*\n` +
-      `Guest: ${session.guestName} (${from})\n` +
+      `🎉 *NEW BOOKING*\n\nVoucher: *${voucherNo}*\nGuest: ${session.guestName} (${from})\n` +
       `CI: ${fmtDate(session.ciDate)} → CO: ${fmtDate(session.coDate)}\n` +
-      `${session.rooms} x ${pmsRoomType} | ${session.plan}\n` +
-      `Total: Rs.${total.toLocaleString()}\n` +
-      `Advance due: Rs.${advance.toLocaleString()}\n` +
-      `PMS ID: ${stayezeeId || "—"}`
+      `${session.rooms} x ${pmsRoomType} | ${session.plan}\nTotal: Rs.${total.toLocaleString()}\n` +
+      `Advance due: Rs.${advance.toLocaleString()}\nPMS ID: ${stayezeeId || "—"}`
     );
-
     session.step = "idle";
   } catch (err) {
     console.error("confirmAndSave error:", err.message);
@@ -675,4 +581,4 @@ async function confirmAndSave(from, session) {
   }
 }
 
-module.exports = { handleIncoming };
+module.exports = { handleIncoming, getEnquiryLog, clearEnquiryLog };
