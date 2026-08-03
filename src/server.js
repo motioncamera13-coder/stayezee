@@ -149,44 +149,59 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     }
 
     if (type === "cancel") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
+      const hName = req.body.hotelName || hotel.name;
       await sendTemplate(to, "cancel_reservation", [
-        guestName, bookingNo || "—", arrivalDate || "—", departureDate || "—",
-        String(rooms || "1"), roomType || "—", String(tariff || "—"), String(pax || "1"), plan || "—",
+        hName,
+        bookingNo     || "—",
+        arrivalDate   || "—",
+        departureDate || "—",
+        String(rooms  || "1"),
+        roomType      || "—",
+        String(tariff || "—"),
+        String(pax    || "1"),
+        plan          || "—",
       ]);
-      console.log(`✓ Cancel sent to ${to} for ${guestName}`);
+      console.log(`✓ Cancel sent to ${to}`);
       return res.json({ success: true, message: `Cancellation message sent to ${to}` });
     }
 
     if (type === "checkin") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
+      const hName = req.body.hotelName || hotel.name;
       await sendTemplate(to, "checkin_message", [
-        guestName, grNo || "—", roomNo || "—", checkinDate || "—", checkoutDate || "—", plan || "—",
+        hName,
+        grNo         || "—",
+        roomNo       || "—",
+        checkinDate  || "—",
+        checkoutDate || "—",
+        plan         || "—",
       ]);
-      console.log(`✓ Checkin sent to ${to} for ${guestName}`);
+      console.log(`✓ Checkin sent to ${to}`);
       return res.json({ success: true, message: `Checkin message sent to ${to}` });
     }
 
     if (type === "checkout") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
+      const hName = req.body.hotelName || hotel.name;
       await sendTemplate(to, "checkout_bill", [
-        guestName,
+        hName,
         String(Number(roomCharges || 0).toLocaleString()),
         String(Number(gst        || 0).toLocaleString()),
         String(Number(total      || 0).toLocaleString()),
         reviewLink || hotel.reviewLink || "—",
       ]);
-      console.log(`✓ Checkout sent to ${to} for ${guestName}`);
+      console.log(`✓ Checkout sent to ${to}`);
       return res.json({ success: true, message: `Checkout message sent to ${to}` });
     }
 
     if (type === "food") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
+      const hName = req.body.hotelName || hotel.name;
       await sendTemplate(to, "food_bill", [
-        guestName, billNo || "—", billDate || "—", outletName || "Restaurant",
+        hName,
+        billNo     || "—",
+        billDate   || "—",
+        outletName || "Restaurant",
         String(Number(billAmount || 0).toLocaleString()),
       ]);
-      console.log(`✓ Food bill sent to ${to} for ${guestName}`);
+      console.log(`✓ Food bill sent to ${to}`);
       return res.json({ success: true, message: `Food bill sent to ${to}` });
     }
 
