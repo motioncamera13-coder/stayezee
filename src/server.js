@@ -11,21 +11,17 @@ const HOTEL_PHONE = process.env.HOTEL_PHONE || "+91 72300 91101";
 const API_KEY     = process.env.PMS_API_KEY || "demohotel";
 const ADMIN_PHONE = process.env.ADMIN_PHONE || "919116091107";
 
-// ── Hotel Registry — add new hotels here ──────────────────────────────────
+// ── Hotel Registry ─────────────────────────────────────────────────────────
 const HOTELS = {
-  // Stayezee Manali (default)
   "demohotel": {
-    name:        "Stayezee",
-    location:    "Manali, Himachal Pradesh",
-    phone:       "+91 72300 91101",
-    reviewLink:  "https://g.page/r/stayezee",
+    name:       "Stayezee",
+    phone:      "+91 72300 91101",
+    reviewLink: "https://g.page/r/stayezee",
   },
-  // Hotel Blue Moon, Ajmer
   "990424666": {
-    name:        "Hotel Blue Moon",
-    location:    "Ajmer, Rajasthan",
-    phone:       "0145-2427767 | 9829179669",
-    reviewLink:  "",
+    name:       "Hotel Blue Moon",
+    phone:      "0145-2427767 | 9829179669",
+    reviewLink: "",
   },
 };
 
@@ -84,19 +80,14 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ══════════════════════════════════════════════════════════════════════════
-//  15-MINUTE ADMIN DIGEST
-//  Every 15 mins, send all new enquiries to admin
-// ══════════════════════════════════════════════════════════════════════════
+// ── 15-minute admin digest ─────────────────────────────────────────────────
 setInterval(async () => {
   try {
     const log = getEnquiryLog();
     if (!log || log.length === 0) return;
-
     let msg = `📊 *15-Min Enquiry Report — ${HOTEL_NAME}*\n`;
     msg += `🕐 ${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })}\n`;
     msg += `━━━━━━━━━━━━━━━━━━\n\n`;
-
     log.forEach((e, i) => {
       msg += `*${i + 1}. ${e.name || "Unknown"}*\n`;
       msg += `📞 ${e.phone}\n`;
@@ -105,27 +96,47 @@ setInterval(async () => {
       if (e.rooms) msg += `🛏 ${e.rooms}\n`;
       msg += `\n`;
     });
-
     msg += `━━━━━━━━━━━━━━━━━━\n`;
     msg += `Total: ${log.length} enquir${log.length === 1 ? "y" : "ies"}`;
-
     await sendMessage(ADMIN_PHONE, msg);
     clearEnquiryLog();
     console.log(`✓ Admin digest sent — ${log.length} enquiries`);
   } catch (err) {
     console.error("Admin digest error:", err.message);
   }
-}, 15 * 60 * 1000); // every 15 minutes
+}, 15 * 60 * 1000);
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SINGLE API — POST /api/send
+//
+//  Template variable mapping:
+//
+//  checkin_messages:
+//    {{1}}=hotelName {{2}}=hotelPhone {{3}}=guestName {{4}}=grNo
+//    {{5}}=roomNo {{6}}=checkinDate {{7}}=checkoutDate {{8}}=plan {{9}}=wifi
+//
+//  checkout_messages:
+//    {{1}}=hotelName {{2}}=hotelPhone {{3}}=guestName {{4}}=roomCharges
+//    {{5}}=gst {{6}}=total {{7}}=reviewLink
+//
+//  reservation_message:
+//    {{1}}=hotelName {{2}}=hotelPhone {{3}}=bookingNo {{4}}=arrivalDate
+//    {{5}}=departureDate {{6}}=rooms {{7}}=roomType {{8}}=tariff {{9}}=pax {{10}}=plan
+//
+//  cancel_reservations:
+//    {{1}}=hotelName {{2}}=hotelPhone {{3}}=bookingNo {{4}}=arrivalDate
+//    {{5}}=departureDate {{6}}=rooms {{7}}=roomType {{8}}=tariff {{9}}=pax {{10}}=plan
+//
+//  food_messages:
+//    {{1}}=hotelName {{2}}=hotelPhone {{3}}=guestName {{4}}=billNo
+//    {{5}}=billDate {{6}}=outletName {{7}}=billAmount
 // ══════════════════════════════════════════════════════════════════════════
 app.post("/api/send", requireApiKey, async (req, res) => {
   try {
     const {
-      type, phone, guestName, hotelId,
+      type, phone, hotelId, guestName,
       bookingNo, arrivalDate, departureDate, rooms, roomType, tariff, pax, plan,
-      grNo, roomNo, checkinDate, checkoutDate,
+      grNo, roomNo, checkinDate, checkoutDate, wifi,
       roomCharges, gst, total, reviewLink,
       billNo, billDate, outletName, billAmount,
       message
@@ -137,21 +148,72 @@ app.post("/api/send", requireApiKey, async (req, res) => {
 
     const to = formatPhone(phone);
     const hotel = getHotel(hotelId);
+    const hName  = req.body.hotelName  || hotel.name;
+    const hPhone = req.body.hotelPhone || hotel.phone;
 
-    if (type === "reservation") {
-      if (!guestName) return res.status(400).json({ success: false, error: "guestName is required" });
-      await sendTemplate(to, "_guest_reservation", [
-        guestName, bookingNo || "—", arrivalDate || "—", departureDate || "—",
-        String(rooms || "1"), roomType || "—", String(tariff || "—"), String(pax || "1"), plan || "—",
+    // ── CHECKIN ──────────────────────────────────────────────────────────
+    // {{1}}=hotelName {{2}}=hotelPhone {{3}}=guestName {{4}}=grNo
+    // {{5}}=roomNo {{6}}=checkinDate {{7}}=checkoutDate {{8}}=plan {{9}}=wifi
+    if (type === "checkin") {
+      await sendTemplate(to, "checkin_messages", [
+        hName,
+        hPhone,
+        guestName    || "Guest",
+        grNo         || "—",
+        roomNo       || "—",
+        checkinDate  || "—",
+        checkoutDate || "—",
+        plan         || "—",
+        wifi         || "Ask reception",
       ]);
-      console.log(`✓ Reservation sent to ${to} for ${guestName}`);
+      console.log(`✓ Checkin sent to ${to}`);
+      return res.json({ success: true, message: `Checkin message sent to ${to}` });
+    }
+
+    // ── CHECKOUT ─────────────────────────────────────────────────────────
+    // {{1}}=hotelName {{2}}=hotelPhone {{3}}=guestName {{4}}=roomCharges
+    // {{5}}=gst {{6}}=total {{7}}=reviewLink
+    if (type === "checkout") {
+      await sendTemplate(to, "checkout_messages", [
+        hName,
+        hPhone,
+        guestName    || "Guest",
+        String(Number(roomCharges || 0).toLocaleString()),
+        String(Number(gst        || 0).toLocaleString()),
+        String(Number(total      || 0).toLocaleString()),
+        reviewLink || hotel.reviewLink || "—",
+      ]);
+      console.log(`✓ Checkout sent to ${to}`);
+      return res.json({ success: true, message: `Checkout message sent to ${to}` });
+    }
+
+    // ── RESERVATION ──────────────────────────────────────────────────────
+    // {{1}}=hotelName {{2}}=hotelPhone {{3}}=bookingNo {{4}}=arrivalDate
+    // {{5}}=departureDate {{6}}=rooms {{7}}=roomType {{8}}=tariff {{9}}=pax {{10}}=plan
+    if (type === "reservation") {
+      await sendTemplate(to, "reservation_message", [
+        hName,
+        hPhone,
+        bookingNo     || "—",
+        arrivalDate   || "—",
+        departureDate || "—",
+        String(rooms  || "1"),
+        roomType      || "—",
+        String(tariff || "—"),
+        String(pax    || "1"),
+        plan          || "—",
+      ]);
+      console.log(`✓ Reservation sent to ${to}`);
       return res.json({ success: true, message: `Reservation message sent to ${to}` });
     }
 
+    // ── CANCEL ───────────────────────────────────────────────────────────
+    // {{1}}=hotelName {{2}}=hotelPhone {{3}}=bookingNo {{4}}=arrivalDate
+    // {{5}}=departureDate {{6}}=rooms {{7}}=roomType {{8}}=tariff {{9}}=pax {{10}}=plan
     if (type === "cancel") {
-      const hName = req.body.hotelName || hotel.name;
-      await sendTemplate(to, "cancel_reservation", [
+      await sendTemplate(to, "cancel_reservations", [
         hName,
+        hPhone,
         bookingNo     || "—",
         arrivalDate   || "—",
         departureDate || "—",
@@ -165,46 +227,24 @@ app.post("/api/send", requireApiKey, async (req, res) => {
       return res.json({ success: true, message: `Cancellation message sent to ${to}` });
     }
 
-    if (type === "checkin") {
-      const hName = req.body.hotelName || hotel.name;
-      await sendTemplate(to, "checkin_message", [
-        hName,
-        grNo         || "—",
-        roomNo       || "—",
-        checkinDate  || "—",
-        checkoutDate || "—",
-        plan         || "—",
-      ]);
-      console.log(`✓ Checkin sent to ${to}`);
-      return res.json({ success: true, message: `Checkin message sent to ${to}` });
-    }
-
-    if (type === "checkout") {
-      const hName = req.body.hotelName || hotel.name;
-      await sendTemplate(to, "checkout_bill", [
-        hName,
-        String(Number(roomCharges || 0).toLocaleString()),
-        String(Number(gst        || 0).toLocaleString()),
-        String(Number(total      || 0).toLocaleString()),
-        reviewLink || hotel.reviewLink || "—",
-      ]);
-      console.log(`✓ Checkout sent to ${to}`);
-      return res.json({ success: true, message: `Checkout message sent to ${to}` });
-    }
-
+    // ── FOOD BILL ────────────────────────────────────────────────────────
+    // {{1}}=hotelName {{2}}=hotelPhone {{3}}=guestName {{4}}=billNo
+    // {{5}}=billDate {{6}}=outletName {{7}}=billAmount
     if (type === "food") {
-      const hName = req.body.hotelName || hotel.name;
-      await sendTemplate(to, "food_bill", [
+      await sendTemplate(to, "food_messages", [
         hName,
-        billNo     || "—",
-        billDate   || "—",
-        outletName || "Restaurant",
+        hPhone,
+        guestName    || "Guest",
+        billNo       || "—",
+        billDate     || "—",
+        outletName   || "Restaurant",
         String(Number(billAmount || 0).toLocaleString()),
       ]);
       console.log(`✓ Food bill sent to ${to}`);
       return res.json({ success: true, message: `Food bill sent to ${to}` });
     }
 
+    // ── CUSTOM MESSAGE ───────────────────────────────────────────────────
     if (type === "message") {
       if (!message) return res.status(400).json({ success: false, error: "message is required" });
       await sendMessage(to, message);
