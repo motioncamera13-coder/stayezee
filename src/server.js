@@ -245,6 +245,74 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     }
 
     // ── CUSTOM MESSAGE ───────────────────────────────────────────────────
+    // ── CHECKIN OWNER NOTIFICATION ───────────────────────────────────────
+    // {{1}}=grNo {{2}}=guestName {{3}}=rooms {{4}}=roomNo {{5}}=tariff
+    // {{6}}=extraBedTariff {{7}}=checkinTime {{8}}=pax {{9}}=nights
+    // {{10}}=occupiedRooms {{11}}=availableRooms {{12}}=blockedRooms {{13}}=outOfOrder
+    if (type === "checkin_owner") {
+      const { grNo, guestName, rooms, roomNo, tariff, extraBedTariff,
+              checkinTime, pax, nights, occupiedRooms, availableRooms,
+              blockedRooms, outOfOrder } = req.body;
+      await sendTemplate(to, "checkin_owner_notification", [
+        grNo            || "—",
+        guestName       || "Guest",
+        String(rooms    || "1"),
+        roomNo          || "—",
+        String(tariff   || "0"),
+        String(extraBedTariff || "0.00"),
+        checkinTime     || "—",
+        String(pax      || "1"),
+        String(nights   || "1"),
+        String(occupiedRooms  || "0"),
+        String(availableRooms || "0"),
+        String(blockedRooms   || "0"),
+        String(outOfOrder     || "0"),
+      ]);
+      console.log(`✓ Checkin owner notification sent to ${to}`);
+      return res.json({ success: true, message: `Checkin owner notification sent to ${to}` });
+    }
+
+    // ── CHECKOUT OWNER NOTIFICATION ──────────────────────────────────────
+    // {{1}}=invoiceNo {{2}}=guestName {{3}}=grNo {{4}}=roomNo {{5}}=roomTariff
+    // {{6}}=extraBed {{7}}=fnbCharges {{8}}=advance {{9}}=totalBill
+    // {{10}}=occupiedRooms {{11}}=availableRooms {{12}}=blockedRooms {{13}}=outOfOrder
+    if (type === "checkout_owner") {
+      const { invoiceNo, guestName, grNo, roomNo, roomTariff, extraBed,
+              fnbCharges, advance, totalBill, occupiedRooms, availableRooms,
+              blockedRooms, outOfOrder } = req.body;
+      await sendTemplate(to, "checkout_owner_notification", [
+        invoiceNo       || "—",
+        guestName       || "Guest",
+        grNo            || "—",
+        roomNo          || "—",
+        String(roomTariff  || "0.00"),
+        String(extraBed    || "0.00"),
+        String(fnbCharges  || "0.00"),
+        String(advance     || "0.00"),
+        String(totalBill   || "0.00"),
+        String(occupiedRooms  || "0"),
+        String(availableRooms || "0"),
+        String(blockedRooms   || "0"),
+        String(outOfOrder     || "0"),
+      ]);
+      console.log(`✓ Checkout owner notification sent to ${to}`);
+      return res.json({ success: true, message: `Checkout owner notification sent to ${to}` });
+    }
+
+    // ── DAILY SALES REPORT ───────────────────────────────────────────────
+    // {{1}}=salesDate {{2}}=dineInRevenue {{3}}=cash
+    if (type === "daily_sales") {
+      const { salesDate, dineInRevenue, cash } = req.body;
+      await sendTemplate(to, "daily_sales_report", [
+        salesDate       || "—",
+        String(dineInRevenue || "0"),
+        String(cash          || "0"),
+      ]);
+      console.log(`✓ Daily sales report sent to ${to}`);
+      return res.json({ success: true, message: `Daily sales report sent to ${to}` });
+    }
+
+    // ── CUSTOM MESSAGE ───────────────────────────────────────────────────
     if (type === "message") {
       if (!message) return res.status(400).json({ success: false, error: "message is required" });
       await sendMessage(to, message);
@@ -254,7 +322,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      error: `Unknown type "${type}". Use: reservation, cancel, checkin, checkout, food, message`
+      error: `Unknown type "${type}". Use: reservation, cancel, checkin, checkout, food, checkin_owner, checkout_owner, daily_sales, message`
     });
 
   } catch (err) {
