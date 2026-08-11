@@ -191,7 +191,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{1}}=hotelName {{2}}=hotelPhone {{3}}=bookingNo {{4}}=arrivalDate
     // {{5}}=departureDate {{6}}=rooms {{7}}=roomType {{8}}=tariff {{9}}=pax {{10}}=plan
     if (type === "reservation") {
-      await sendTemplate(to, "reservation_message", [
+      await sendTemplate(to, "reservation_messages", [
         hName,
         hPhone,
         bookingNo     || "—",
@@ -300,13 +300,22 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     }
 
     // ── DAILY SALES REPORT ───────────────────────────────────────────────
-    // {{1}}=salesDate {{2}}=dineInRevenue {{3}}=cash
+    // {{1}}=salesDate {{2}}=revenueSection {{3}}=unused {{4}}=paymentSection
+    // {{5}}=roomsCheckin {{6}}=roomsCheckout {{7}}=extraBeds
+    // {{8}}=arr {{9}}=occupancy
     if (type === "daily_sales") {
-      const { salesDate, dineInRevenue, cash } = req.body;
+      const { salesDate, revenueSection, paymentSection,
+              roomsCheckin, roomsCheckout, extraBeds, arr, occupancy } = req.body;
       await sendTemplate(to, "daily_sales_report", [
-        salesDate       || "—",
-        String(dineInRevenue || "0"),
-        String(cash          || "0"),
+        salesDate        || "—",
+        revenueSection   || "—",
+        "—",
+        paymentSection   || "—",
+        String(roomsCheckin  || "0"),
+        String(roomsCheckout || "0"),
+        String(extraBeds     || "0"),
+        String(arr           || "0"),
+        String(occupancy     || "0"),
       ]);
       console.log(`✓ Daily sales report sent to ${to}`);
       return res.json({ success: true, message: `Daily sales report sent to ${to}` });
