@@ -23,15 +23,22 @@ const HOTELS = {
     phone:      "0145-2427767 | 9829179669",
     reviewLink: "",
   },
+  "701125899": {
+    name:       "Elysian Hotel & Restaurant",
+    phone:      "+91 99834 90068",
+    reviewLink: "",
+  },
 };
 
 function getHotel(hotelId) {
   return HOTELS[hotelId] || HOTELS["demohotel"];
 }
 
+const VALID_API_KEYS = [API_KEY, "701125899", "990424666"];
+
 function requireApiKey(req, res, next) {
   const key = req.headers["x-api-key"] || req.query.api_key;
-  if (!key || key !== API_KEY) {
+  if (!key || !VALID_API_KEYS.includes(key)) {
     return res.status(401).json({ success: false, error: "Invalid or missing API key" });
   }
   next();
@@ -192,8 +199,7 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{5}}=departureDate {{6}}=rooms {{7}}=roomType {{8}}=tariff {{9}}=pax {{10}}=plan
     if (type === "reservation") {
       await sendTemplate(to, "reservation_messages", [
-        hName,
-        hPhone,
+        guestName     || "Guest",
         bookingNo     || "—",
         arrivalDate   || "—",
         departureDate || "—",
@@ -244,6 +250,43 @@ app.post("/api/send", requireApiKey, async (req, res) => {
       return res.json({ success: true, message: `Food bill sent to ${to}` });
     }
 
+
+    if (type === "advance_payment") {
+      const { guestName, receiptNo, receiptType, bookingNo, roomNo, advanceAmount, paymentMode, paymentDate, receiptTime, arrivalDate, departureDate } = req.body;
+      await sendTemplate(to, "advance_payment_receipt", [receiptNo||"—",receiptType||"—",bookingNo||"—",guestName||"Guest",roomNo||"—",String(advanceAmount||"0"),paymentMode||"—",paymentDate||"—",receiptTime||"—",arrivalDate||"—",departureDate||"—"]);
+      console.log("✓ Advance payment sent to "+to);
+      return res.json({ success: true, message: "Advance payment receipt sent to "+to });
+    }
+    if (type === "reservation_notification") {
+      const { bookingNo, guestName, mobileNo, arrivalDate, departureDate, nights, roomType, rooms, pax, extraBed, plan, tariff, totalAmount } = req.body;
+      await sendTemplate(to, "reservation_notification", [bookingNo||"—",guestName||"Guest",mobileNo||"—",arrivalDate||"—",departureDate||"—",String(nights||"1"),roomType||"—",String(rooms||"1"),String(pax||"1"),String(extraBed||"0"),plan||"—",String(tariff||"0"),String(totalAmount||"0")]);
+      console.log("✓ Reservation notification sent to "+to);
+      return res.json({ success: true, message: "Reservation notification sent to "+to });
+    }
+    if (type === "checkin_form") {
+      const { checkinUrl } = req.body;
+      await sendTemplate(to, "checkin_form_link", [checkinUrl||"—",hName]);
+      console.log("✓ Checkin form sent to "+to);
+      return res.json({ success: true, message: "Checkin form link sent to "+to });
+    }
+    if (type === "receipt_notification") {
+      const { receiptNo, receiptType, bookingNo, guestName, roomNo, advanceAmount, paymentMode, paymentDate, receiptTime, arrivalDate, departureDate } = req.body;
+      await sendTemplate(to, "receipt_notification", [receiptNo||"—",receiptType||"—",bookingNo||"—",guestName||"Guest",roomNo||"—",String(advanceAmount||"0"),paymentMode||"—",paymentDate||"—",receiptTime||"—",arrivalDate||"—",departureDate||"—"]);
+      console.log("✓ Receipt notification sent to "+to);
+      return res.json({ success: true, message: "Receipt notification sent to "+to });
+    }
+    if (type === "login_notification") {
+      const { guestName, mobile, loginTime } = req.body;
+      await sendTemplate(to, "login_notification", [guestName||"Guest",mobile||"—",loginTime||"—"]);
+      console.log("✓ Login notification sent to "+to);
+      return res.json({ success: true, message: "Login notification sent to "+to });
+    }
+    if (type === "order_notification") {
+      const { customerName, address, customerPhone, orderType, orderItems, subTotal, discount, tax, totalAmount, paymentMode, location } = req.body;
+      await sendTemplate(to, "order_notification", [hName,customerName||"Guest",address||"—",customerPhone||"—",orderType||"—",orderItems||"—",String(subTotal||"0"),String(discount||"0"),String(tax||"0"),String(totalAmount||"0"),paymentMode||"—",location||"—"]);
+      console.log("✓ Order notification sent to "+to);
+      return res.json({ success: true, message: "Order notification sent to "+to });
+    }
     // ── CUSTOM MESSAGE ───────────────────────────────────────────────────
     // ── CHECKIN OWNER NOTIFICATION ───────────────────────────────────────
     // {{1}}=grNo {{2}}=guestName {{3}}=rooms {{4}}=roomNo {{5}}=tariff
@@ -304,23 +347,50 @@ app.post("/api/send", requireApiKey, async (req, res) => {
     // {{5}}=roomsCheckin {{6}}=roomsCheckout {{7}}=extraBeds
     // {{8}}=arr {{9}}=occupancy
     if (type === "daily_sales") {
-      const { salesDate, revenueSection, paymentSection,
-              roomsCheckin, roomsCheckout, extraBeds, arr, occupancy } = req.body;
-      await sendTemplate(to, "daily_sales_report", [
-        salesDate        || "—",
-        revenueSection   || "—",
-        "—",
-        paymentSection   || "—",
-        String(roomsCheckin  || "0"),
-        String(roomsCheckout || "0"),
-        String(extraBeds     || "0"),
-        String(arr           || "0"),
-        String(occupancy     || "0"),
-      ]);
-      console.log(`✓ Daily sales report sent to ${to}`);
-      return res.json({ success: true, message: `Daily sales report sent to ${to}` });
+      const { salesDate, outletWise, paymentWise } = req.body;
+      await sendTemplate(to, "daily_sales_report", [salesDate||"—",outletWise||"—",paymentWise||"—"]);
+      console.log("✓ Daily sales sent to "+to);
+      return res.json({ success: true, message: "Daily sales report sent to "+to });
+    }` });
     }
 
+
+    if (type === "advance_payment") {
+      const { guestName, receiptNo, receiptType, bookingNo, roomNo, advanceAmount, paymentMode, paymentDate, receiptTime, arrivalDate, departureDate } = req.body;
+      await sendTemplate(to, "advance_payment_receipt", [receiptNo||"—",receiptType||"—",bookingNo||"—",guestName||"Guest",roomNo||"—",String(advanceAmount||"0"),paymentMode||"—",paymentDate||"—",receiptTime||"—",arrivalDate||"—",departureDate||"—"]);
+      console.log("✓ Advance payment sent to "+to);
+      return res.json({ success: true, message: "Advance payment receipt sent to "+to });
+    }
+    if (type === "reservation_notification") {
+      const { bookingNo, guestName, mobileNo, arrivalDate, departureDate, nights, roomType, rooms, pax, extraBed, plan, tariff, totalAmount } = req.body;
+      await sendTemplate(to, "reservation_notification", [bookingNo||"—",guestName||"Guest",mobileNo||"—",arrivalDate||"—",departureDate||"—",String(nights||"1"),roomType||"—",String(rooms||"1"),String(pax||"1"),String(extraBed||"0"),plan||"—",String(tariff||"0"),String(totalAmount||"0")]);
+      console.log("✓ Reservation notification sent to "+to);
+      return res.json({ success: true, message: "Reservation notification sent to "+to });
+    }
+    if (type === "checkin_form") {
+      const { checkinUrl } = req.body;
+      await sendTemplate(to, "checkin_form_link", [checkinUrl||"—",hName]);
+      console.log("✓ Checkin form sent to "+to);
+      return res.json({ success: true, message: "Checkin form link sent to "+to });
+    }
+    if (type === "receipt_notification") {
+      const { receiptNo, receiptType, bookingNo, guestName, roomNo, advanceAmount, paymentMode, paymentDate, receiptTime, arrivalDate, departureDate } = req.body;
+      await sendTemplate(to, "receipt_notification", [receiptNo||"—",receiptType||"—",bookingNo||"—",guestName||"Guest",roomNo||"—",String(advanceAmount||"0"),paymentMode||"—",paymentDate||"—",receiptTime||"—",arrivalDate||"—",departureDate||"—"]);
+      console.log("✓ Receipt notification sent to "+to);
+      return res.json({ success: true, message: "Receipt notification sent to "+to });
+    }
+    if (type === "login_notification") {
+      const { guestName, mobile, loginTime } = req.body;
+      await sendTemplate(to, "login_notification", [guestName||"Guest",mobile||"—",loginTime||"—"]);
+      console.log("✓ Login notification sent to "+to);
+      return res.json({ success: true, message: "Login notification sent to "+to });
+    }
+    if (type === "order_notification") {
+      const { customerName, address, customerPhone, orderType, orderItems, subTotal, discount, tax, totalAmount, paymentMode, location } = req.body;
+      await sendTemplate(to, "order_notification", [hName,customerName||"Guest",address||"—",customerPhone||"—",orderType||"—",orderItems||"—",String(subTotal||"0"),String(discount||"0"),String(tax||"0"),String(totalAmount||"0"),paymentMode||"—",location||"—"]);
+      console.log("✓ Order notification sent to "+to);
+      return res.json({ success: true, message: "Order notification sent to "+to });
+    }
     // ── CUSTOM MESSAGE ───────────────────────────────────────────────────
     if (type === "message") {
       if (!message) return res.status(400).json({ success: false, error: "message is required" });
